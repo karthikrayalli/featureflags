@@ -1,11 +1,11 @@
-import { useFeatureFlags } from '../lib/featureFlagsProvider';
+import { useFeatureFlags } from '@/lib/providers/FeatureFlagsProvider';
 import { ChevronDown } from 'lucide-react';
-import { type User, type UserRole } from '../lib/getUser';
+import type { User } from '@/types';
 
 const DEMO_USERS: User[] = [
-  { id: '1', name: 'Demo User', role: 'user' },
-  { id: '2', name: 'Admin User', role: 'admin' },
-  { id: '3', name: 'Tester User', role: 'tester' },
+  { id: 'user-1', name: 'John Doe', email: 'john@example.com', role: 'user' },
+  { id: 'admin-1', name: 'Jane Admin', email: 'jane@example.com', role: 'admin' },
+  { id: 'tester-1', name: 'Bob Tester', email: 'bob@example.com', role: 'tester' },
 ];
 
 export function UserSelector() {
@@ -25,7 +25,7 @@ export function UserSelector() {
         <select
           value={currentUser.id}
           onChange={(e) => handleUserChange(e.target.value)}
-          className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-10 text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-10 text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 min-w-[200px]"
         >
           {DEMO_USERS.map(user => (
             <option key={user.id} value={user.id}>
