@@ -1,7 +1,8 @@
 import { Toggle } from '@/components/Toggle';
 import { Trash2, Edit2 } from 'lucide-react';
 import { useFeatureFlags } from '@/lib/providers/FeatureFlagsProvider';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { useDebounce } from '@/lib/utils/debounce';
 
 interface FeatureFlagListProps {
   onEdit: (flagKey: string) => void;
@@ -10,35 +11,74 @@ interface FeatureFlagListProps {
 export function FeatureFlagList({ onEdit }: FeatureFlagListProps) {
   const { flags, deleteFlag, updateFlag } = useFeatureFlags();
   const [flagsList, setFlagsList] = useState<Array<{ key: string; value: any }>>([]);
+  const [optimisticFlags, setOptimisticFlags] = useState<Record<string, any>>({});
 
   useEffect(() => {
     const list = Object.entries(flags).map(([key, value]) => ({ key, value }));
     setFlagsList(list);
   }, [flags]);
 
-  const toggleEnvironment = (flagKey: string, env: string) => {
-    const flagValue = flags[flagKey];
+  // Compute the effective flag value (optimistic or actual)
+  const getEffectiveFlagValue = useCallback((flagKey: string) => {
+    if (flagKey in optimisticFlags) {
+      return optimisticFlags[flagKey];
+    }
+    return flags[flagKey];
+  }, [flags, optimisticFlags]);
+
+  // Compute new flag value based on toggle
+  const computeNewFlagValue = useCallback((flagKey: string, env: string): any => {
+    const flagValue = getEffectiveFlagValue(flagKey);
     
     if (typeof flagValue === 'boolean') {
       // Convert boolean to environment-specific rules
-      updateFlag(flagKey, [{ environment: env, enabled: true }]);
+      return [{ environment: env, enabled: true }];
     } else if (Array.isArray(flagValue)) {
       const existingRule = flagValue.find((r: any) => r.environment === env);
       if (existingRule) {
         // Remove rule for this environment
         const newRules = flagValue.filter((r: any) => r.environment !== env);
-        updateFlag(flagKey, newRules.length > 0 ? newRules : false);
+        return newRules.length > 0 ? newRules : false;
       } else {
         // Add rule for this environment
-        updateFlag(flagKey, [...flagValue, { environment: env }]);
+        return [...flagValue, { environment: env }];
       }
     } else {
       // Create new rule
-      updateFlag(flagKey, [{ environment: env }]);
+      return [{ environment: env }];
     }
-  };
+  }, [getEffectiveFlagValue]);
 
-  const isEnvironmentEnabled = (value: any, env: string): boolean => {
+  // Handler for debounced API call
+  const handleDebouncedUpdate = useCallback((flagKey: string, value: any) => {
+    updateFlag(flagKey, value);
+    // Clear optimistic update after API call
+    setOptimisticFlags(prev => {
+      const updated = { ...prev };
+      delete updated[flagKey];
+      return updated;
+    });
+  }, [updateFlag]);
+
+  // Create a debounced version of the update handler
+  const debouncedUpdateFlag = useDebounce(handleDebouncedUpdate, 300);
+
+  const toggleEnvironment = useCallback((flagKey: string, env: string) => {
+    // Compute new value based on current state
+    const newValue = computeNewFlagValue(flagKey, env);
+    
+    // Optimistic update - update UI immediately
+    setOptimisticFlags(prev => ({
+      ...prev,
+      [flagKey]: newValue
+    }));
+
+    // Debounced API call
+    debouncedUpdateFlag(flagKey, newValue);
+  }, [computeNewFlagValue, debouncedUpdateFlag]);
+
+  const isEnvironmentEnabled = useCallback((flagKey: string, env: string): boolean => {
+    const value = getEffectiveFlagValue(flagKey);
     if (typeof value === 'boolean') return value;
     if (Array.isArray(value)) {
       return value.some((rule: any) => rule.environment === env);
@@ -48,9 +88,10 @@ export function FeatureFlagList({ onEdit }: FeatureFlagListProps) {
       return value.environment === env;
     }
     return false;
-  };
+  }, [getEffectiveFlagValue]);
 
-  const getRuleInfo = (value: any, env: string): string => {
+  const getRuleInfo = useCallback((flagKey: string, env: string): string => {
+    const value = getEffectiveFlagValue(flagKey);
     if (typeof value === 'boolean') return value ? 'All users' : 'Disabled';
     if (Array.isArray(value)) {
       const rule = value.find((r: any) => r.environment === env);
@@ -90,7 +131,7 @@ export function FeatureFlagList({ onEdit }: FeatureFlagListProps) {
       return parts.length > 0 ? parts.join(' • ') : 'Enabled';
     }
     return 'Disabled';
-  };
+  }, [getEffectiveFlagValue]);
 
   const handleDelete = (flagKey: string) => {
     if (confirm(`Are you sure you want to delete the feature flag "${flagKey}"?`)) {
@@ -128,33 +169,33 @@ export function FeatureFlagList({ onEdit }: FeatureFlagListProps) {
                 <td className="px-6 py-4">
                   <div className="flex flex-col items-center gap-1">
                     <Toggle
-                      checked={isEnvironmentEnabled(value, 'dev')}
+                      checked={isEnvironmentEnabled(key, 'dev')}
                       onChange={() => toggleEnvironment(key, 'dev')}
                     />
                     <span className="text-xs text-gray-500">
-                      {getRuleInfo(value, 'dev')}
+                      {getRuleInfo(key, 'dev')}
                     </span>
                   </div>
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex flex-col items-center gap-1">
                     <Toggle
-                      checked={isEnvironmentEnabled(value, 'production')}
+                      checked={isEnvironmentEnabled(key, 'production')}
                       onChange={() => toggleEnvironment(key, 'production')}
                     />
                     <span className="text-xs text-gray-500">
-                      {getRuleInfo(value, 'production')}
+                      {getRuleInfo(key, 'production')}
                     </span>
                   </div>
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex flex-col items-center gap-1">
                     <Toggle
-                      checked={isEnvironmentEnabled(value, 'testing')}
+                      checked={isEnvironmentEnabled(key, 'testing')}
                       onChange={() => toggleEnvironment(key, 'testing')}
                     />
                     <span className="text-xs text-gray-500">
-                      {getRuleInfo(value, 'testing')}
+                      {getRuleInfo(key, 'testing')}
                     </span>
                   </div>
                 </td>

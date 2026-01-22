@@ -1,83 +1,102 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { User, FeatureFlagName } from '@/types';
 
-// Storage keys
-const STORAGE_KEY = 'feature-flags';
-const ENV_KEY = 'current-environment';
-const USER_KEY = 'current-user';
-const OVERRIDES_KEY = 'flag-overrides';
+// Default user
+const defaultUser: User = {
+  id: 'user-1',
+  name: 'John Doe',
+  email: 'john@example.com',
+  role: 'user'
+};
 
-// Storage helpers
-function getStoredFlags(): Record<string, any> {
-  if (typeof window === 'undefined') return {};
+// API helpers
+async function fetchFlags(): Promise<Record<string, any>> {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : {};
+    const response = await fetch('/api/flags');
+    if (!response.ok) return {};
+    return await response.json();
   } catch {
     return {};
   }
 }
 
-function setStoredFlags(flags: Record<string, any>) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(flags));
-}
-
-function getCurrentEnvironment(): string {
-  if (typeof window === 'undefined') return 'production';
-  return localStorage.getItem(ENV_KEY) || 'production';
-}
-
-function setCurrentEnvironment(env: string) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(ENV_KEY, env);
-}
-
-function getUser(): User {
-  if (typeof window === 'undefined') {
-    return {
-      id: 'user-1',
-      name: 'John Doe',
-      email: 'john@example.com',
-      role: 'user'
-    };
-  }
-  
+async function saveFlags(flags: Record<string, any>): Promise<void> {
   try {
-    const stored = localStorage.getItem(USER_KEY);
-    if (stored) {
-      return JSON.parse(stored);
-    }
+    await fetch('/api/flags', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(flags),
+    });
+  } catch (error) {
+    console.error('Failed to save flags:', error);
+  }
+}
+
+async function fetchEnvironment(): Promise<string> {
+  try {
+    const response = await fetch('/api/environment');
+    if (!response.ok) return 'production';
+    const data = await response.json();
+    return data.environment || 'production';
   } catch {
-    // Fall through to default
+    return 'production';
   }
-  
-  return {
-    id: 'user-1',
-    name: 'John Doe',
-    email: 'john@example.com',
-    role: 'user'
-  };
 }
 
-function setStoredUser(user: User) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
-function getStoredOverrides(): Record<string, string | boolean> {
-  if (typeof window === 'undefined') return {};
+async function saveEnvironment(env: string): Promise<void> {
   try {
-    const stored = localStorage.getItem(OVERRIDES_KEY);
-    return stored ? JSON.parse(stored) : {};
+    await fetch('/api/environment', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ environment: env }),
+    });
+  } catch (error) {
+    console.error('Failed to save environment:', error);
+  }
+}
+
+async function fetchUser(): Promise<User> {
+  try {
+    const response = await fetch('/api/user');
+    if (!response.ok) return defaultUser;
+    return await response.json();
+  } catch {
+    return defaultUser;
+  }
+}
+
+async function saveUser(user: User): Promise<void> {
+  try {
+    await fetch('/api/user', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user),
+    });
+  } catch (error) {
+    console.error('Failed to save user:', error);
+  }
+}
+
+async function fetchOverrides(): Promise<Record<string, string | boolean>> {
+  try {
+    const response = await fetch('/api/overrides');
+    if (!response.ok) return {};
+    return await response.json();
   } catch {
     return {};
   }
 }
 
-function setStoredOverrides(overrides: Record<string, string | boolean>) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides));
+async function saveOverrides(overrides: Record<string, string | boolean>): Promise<void> {
+  try {
+    await fetch('/api/overrides', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(overrides),
+    });
+  } catch (error) {
+    console.error('Failed to save overrides:', error);
+  }
 }
 
 interface FeatureFlagsContextType {
@@ -99,59 +118,83 @@ const FeatureFlagsContext = createContext<FeatureFlagsContextType | null>(null);
 export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
   const [flags, setFlags] = useState<Record<string, any>>({});
   const [currentEnvironment, setCurrentEnv] = useState<string>('production');
-  const [currentUser, setCurrentUser] = useState<User>(getUser());
+  const [currentUser, setCurrentUser] = useState<User>(defaultUser);
   const [flagOverrides, setFlagOverrides] = useState<Record<string, string | boolean>>({});
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    setFlags(getStoredFlags());
-    setCurrentEnv(getCurrentEnvironment());
-    setFlagOverrides(getStoredOverrides());
+    async function loadData() {
+      const [loadedFlags, loadedEnv, loadedUser, loadedOverrides] = await Promise.all([
+        fetchFlags(),
+        fetchEnvironment(),
+        fetchUser(),
+        fetchOverrides(),
+      ]);
+      
+      setFlags(loadedFlags);
+      setCurrentEnv(loadedEnv);
+      setCurrentUser(loadedUser);
+      setFlagOverrides(loadedOverrides);
+      setIsLoading(false);
+    }
+    
+    loadData();
   }, []);
 
-  const updateFlag = (name: FeatureFlagName, value: any) => {
+  const updateFlag = async (name: FeatureFlagName, value: any) => {
     const newFlags = { ...flags, [name]: value };
     setFlags(newFlags);
-    setStoredFlags(newFlags);
+    await saveFlags(newFlags);
   };
 
-  const deleteFlag = (name: FeatureFlagName) => {
+  const deleteFlag = async (name: FeatureFlagName) => {
     const newFlags = { ...flags };
     delete newFlags[name];
     setFlags(newFlags);
-    setStoredFlags(newFlags);
+    await saveFlags(newFlags);
   };
 
-  const setEnvironment = (env: string) => {
+  const setEnvironment = async (env: string) => {
     setCurrentEnv(env);
-    setCurrentEnvironment(env);
-    window.dispatchEvent(new Event('environment-changed'));
+    await saveEnvironment(env);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('environment-changed'));
+    }
   };
 
-  const setUser = (user: User) => {
+  const setUser = async (user: User) => {
     setCurrentUser(user);
-    setStoredUser(user);
-    window.dispatchEvent(new Event('user-changed'));
+    await saveUser(user);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('user-changed'));
+    }
   };
 
-  const setFlagOverride = (flagKey: string, value: string | boolean) => {
+  const setFlagOverride = async (flagKey: string, value: string | boolean) => {
     const newOverrides = { ...flagOverrides, [flagKey]: value };
     setFlagOverrides(newOverrides);
-    setStoredOverrides(newOverrides);
-    window.dispatchEvent(new Event('flag-override-changed'));
+    await saveOverrides(newOverrides);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('flag-override-changed'));
+    }
   };
 
-  const clearFlagOverride = (flagKey: string) => {
+  const clearFlagOverride = async (flagKey: string) => {
     const newOverrides = { ...flagOverrides };
     delete newOverrides[flagKey];
     setFlagOverrides(newOverrides);
-    setStoredOverrides(newOverrides);
-    window.dispatchEvent(new Event('flag-override-changed'));
+    await saveOverrides(newOverrides);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('flag-override-changed'));
+    }
   };
 
-  const clearAllOverrides = () => {
+  const clearAllOverrides = async () => {
     setFlagOverrides({});
-    setStoredOverrides({});
-    window.dispatchEvent(new Event('flag-override-changed'));
+    await saveOverrides({});
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('flag-override-changed'));
+    }
   };
 
   return (
